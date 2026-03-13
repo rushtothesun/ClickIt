@@ -42,7 +42,7 @@ namespace ClickIt.Services
             string path = item.Path;
             EntityType type = item.Type;
 
-            if (type == EntityType.WorldItem && !ShouldAllowWorldItemByMetadata(settings, item))
+            if (type == EntityType.WorldItem && !ShouldAllowWorldItemByIFL(item, settings.ItemFilters, gameController))
                 return null;
             if (ShouldClickWorldItemCore(settings.ClickItems, type, item))
                 return MechanicItems;
@@ -135,7 +135,7 @@ namespace ClickIt.Services
             if (string.IsNullOrEmpty(path))
                 return null;
 
-            bool strongboxesEnabled = settings.StrongboxClickMetadata?.Count > 0;
+            bool strongboxesEnabled = settings.ClickStrongboxes && settings.StrongboxClickMetadata?.Count > 0;
 
             var checks = new (bool On, string MechanicId, Func<string, bool> Matches)[]
             {

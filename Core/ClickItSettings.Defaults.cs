@@ -10,56 +10,6 @@ namespace ClickIt
 {
     public partial class ClickItSettings : ISettings
     {
-        private void EnsureItemTypeFiltersInitialized()
-        {
-            ItemTypeWhitelistIds ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            ItemTypeBlacklistIds ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            ItemTypeWhitelistSubtypeIds ??= new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-            ItemTypeBlacklistSubtypeIds ??= new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-
-            if (ItemTypeWhitelistIds.Count == 0 && ItemTypeBlacklistIds.Count == 0)
-            {
-                ItemTypeWhitelistIds = new HashSet<string>(ItemCategoryCatalog.DefaultWhitelistIds, StringComparer.OrdinalIgnoreCase);
-                ItemTypeBlacklistIds = new HashSet<string>(ItemCategoryCatalog.DefaultBlacklistIds, StringComparer.OrdinalIgnoreCase);
-                ItemTypeBlacklistSubtypeIds["jewels"] = new HashSet<string>(new[] { "regular-jewels", "abyss-jewels" }, StringComparer.OrdinalIgnoreCase);
-                return;
-            }
-
-            ItemTypeWhitelistIds.RemoveWhere(x => !ItemCategoryCatalog.AllIds.Contains(x));
-            ItemTypeBlacklistIds.RemoveWhere(x => !ItemCategoryCatalog.AllIds.Contains(x));
-
-            foreach (string id in ItemTypeWhitelistIds.ToArray())
-            {
-                ItemTypeBlacklistIds.Remove(id);
-            }
-
-            SanitizeSubtypeDictionary(ItemTypeWhitelistSubtypeIds, ItemTypeWhitelistIds);
-            SanitizeSubtypeDictionary(ItemTypeBlacklistSubtypeIds, ItemTypeBlacklistIds);
-        }
-
-        private static void SanitizeSubtypeDictionary(Dictionary<string, HashSet<string>> subtypeSelections, HashSet<string> parentCategoryIds)
-        {
-            string[] invalidParentIds = subtypeSelections.Keys
-                .Where(id => !parentCategoryIds.Contains(id) || !ItemSubtypeCatalog.ContainsKey(id))
-                .ToArray();
-
-            foreach (string invalidParentId in invalidParentIds)
-            {
-                subtypeSelections.Remove(invalidParentId);
-            }
-
-            foreach ((string parentId, HashSet<string> selectedSubtypes) in subtypeSelections.ToArray())
-            {
-                if (!ItemSubtypeCatalog.TryGetValue(parentId, out ItemSubtypeDefinition[]? subtypeDefinitions))
-                {
-                    subtypeSelections.Remove(parentId);
-                    continue;
-                }
-
-                HashSet<string> validSubtypeIds = new HashSet<string>(subtypeDefinitions.Select(x => x.Id), StringComparer.OrdinalIgnoreCase);
-                selectedSubtypes.RemoveWhere(id => !validSubtypeIds.Contains(id));
-            }
-        }
 
         private static HashSet<string> BuildDefaultCorruptEssenceNames()
         {

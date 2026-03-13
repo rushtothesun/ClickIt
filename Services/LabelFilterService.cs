@@ -1,6 +1,7 @@
-﻿using ExileCore.PoEMemory.Components;
+using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.Elements;
 using ExileCore.PoEMemory.MemoryObjects;
+using ItemFilterLibrary;
 using SharpDX;
 using RectangleF = SharpDX.RectangleF;
 using ClickIt.Utils;
@@ -268,8 +269,7 @@ namespace ClickIt.Services
             {
                 ClickDistance = s.ClickDistance.Value,
                 ClickItems = s.ClickItems.Value,
-                ItemTypeWhitelistMetadata = s.GetItemTypeWhitelistMetadataIdentifiers(),
-                ItemTypeBlacklistMetadata = s.GetItemTypeBlacklistMetadataIdentifiers(),
+                ItemFilters = s.ItemFilters ?? new(),
                 ClickBasicChests = s.ClickBasicChests.Value,
                 ClickLeagueChests = !applyLazyModeRestrictions && s.ClickLeagueChests.Value,
                 ClickDoors = s.ClickDoors.Value,
@@ -287,6 +287,7 @@ namespace ClickIt.Services
                 ClickCrafting = s.ClickCraftingRecipes.Value,
                 ClickBreach = s.ClickBreachNodes.Value,
                 ClickSettlersOre = !applyLazyModeRestrictions && s.ClickSettlersOre.Value,
+                ClickStrongboxes = s.ClickStrongboxes.Value,
                 StrongboxClickMetadata = s.GetStrongboxClickMetadataIdentifiers(),
                 StrongboxDontClickMetadata = s.GetStrongboxDontClickMetadataIdentifiers(),
                 ClickSanctum = s.ClickSanctum.Value,
@@ -308,8 +309,7 @@ namespace ClickIt.Services
         {
             public int ClickDistance { get; set; }
             public bool ClickItems { get; set; }
-            public IReadOnlyList<string> ItemTypeWhitelistMetadata { get; set; }
-            public IReadOnlyList<string> ItemTypeBlacklistMetadata { get; set; }
+            public List<ItemFilterLibrary.ItemFilter> ItemFilters { get; set; }
             public bool ClickBasicChests { get; set; }
             public bool ClickLeagueChests { get; set; }
             public bool ClickDoors { get; set; }
@@ -334,6 +334,7 @@ namespace ClickIt.Services
             public bool ClickCrafting { get; set; }
             public bool ClickBreach { get; set; }
             public bool ClickSettlersOre { get; set; }
+            public bool ClickStrongboxes { get; set; }
             public IReadOnlyList<string> StrongboxClickMetadata { get; set; }
             public IReadOnlyList<string> StrongboxDontClickMetadata { get; set; }
             public bool ClickSanctum { get; set; }

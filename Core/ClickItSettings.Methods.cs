@@ -1,7 +1,9 @@
+using ExileCore;
 using ExileCore.Shared.Attributes;
 using ExileCore.Shared.Interfaces;
 using ExileCore.Shared.Nodes;
 using ImGuiNET;
+using ItemFilterLibrary;
 using Newtonsoft.Json;
 using System.Numerics;
 using ClickIt.Definitions;
@@ -112,172 +114,239 @@ namespace ClickIt
             DrawInlineTooltip("If you run into a bug that hasn't already been reported, please report it here.");
         }
 
-        private void DrawItemTypeFiltersPanel()
+        private void DrawItemFilterRulesPanel()
         {
-            EnsureItemTypeFiltersInitialized();
-
-            ImGui.SetNextItemOpen(false, ImGuiCond.Once);
-            bool sectionOpen = ImGui.TreeNode("Item Filters");
-            DrawInlineTooltip("Configure item whitelist/blacklist behavior. Use arrows to move entries between lists and click a row to open subtype options.");
-            if (!sectionOpen)
-                return;
-
-            try
+            ImGui.Separator();
+            if (ImGui.Button("Open Filter Folder"))
             {
-                ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), "Click a table row to open subtype filter options.");
-                ImGui.Spacing();
+                var configDir = GetClickItConfigDirectory();
+                if (Directory.Exists(configDir))
+                    System.Diagnostics.Process.Start("explorer.exe", configDir);
+            }
 
-                DrawSearchBar("##ItemTypeSearch", "Clear##ItemTypeClear", ref itemTypeSearchFilter);
-                if (DrawResetDefaultsButton("Reset Defaults##ItemTypeDefaults"))
+            ImGui.SameLine();
+            if (ImGui.Button("Reload Rules"))
+                LoadItemFilters();
+
+            ImGui.Separator();
+            ImGui.Text("Rule Files\nFiles are loaded in order. Rules loaded first are evaluated first.");
+            ImGui.Separator();
+
+            if (ImGui.BeginTable("ClickItRulesTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable))
+            {
+                ImGui.TableSetupColumn("Drag", ImGuiTableColumnFlags.WidthFixed, 40);
+                ImGui.TableSetupColumn("Toggle", ImGuiTableColumnFlags.WidthFixed, 50);
+                ImGui.TableSetupColumn("File", ImGuiTableColumnFlags.None);
+                ImGui.TableHeadersRow();
+
+                var rules = ClickItRules;
+                for (int i = 0; i < rules.Count; i++)
                 {
-                    ItemTypeWhitelistIds = new HashSet<string>(ItemCategoryCatalog.DefaultWhitelistIds, StringComparer.OrdinalIgnoreCase);
-                    ItemTypeBlacklistIds = new HashSet<string>(ItemCategoryCatalog.DefaultBlacklistIds, StringComparer.OrdinalIgnoreCase);
-                    ItemTypeWhitelistSubtypeIds.Clear();
-                    ItemTypeBlacklistSubtypeIds.Clear();
-                    _expandedItemTypeRowKey = string.Empty;
-                }
-
-                ImGui.Spacing();
-
-                bool tableOpen = ImGui.BeginTable("ItemTypeFilterLists", 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
-                if (!tableOpen)
-                    return;
-
-                try
-                {
-                    SetupTwoColumnFilterTableHeader(
-                        leftHeader: "Whitelist",
-                        rightHeader: "Blacklist",
-                        leftBackground: new Vector4(0.2f, 0.6f, 0.2f, 0.3f),
-                        rightBackground: new Vector4(0.6f, 0.2f, 0.2f, 0.3f));
-
+                    var rule = rules[i];
                     ImGui.TableNextRow();
 
+                    // Drag column
                     ImGui.TableSetColumnIndex(0);
-                    DrawItemTypeList("Whitelist##ItemType", ItemTypeWhitelistIds, moveToWhitelist: false, textColor: WhitelistTextColor);
+                    ImGui.PushID($"drag_{rule.Location}");
 
+                    var dropTargetStart = ImGui.GetCursorScreenPos();
+
+                    ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0, 0, 0, 0));
+                    ImGui.Button("=", new Vector2(30, 20));
+                    ImGui.PopStyleColor();
+
+                    if (ImGui.BeginDragDropSource())
+                    {
+                        ImGuiHelpers.SetDragDropPayload("ClickItRuleIndex", i);
+                        ImGui.Text(rule.Name);
+                        ImGui.EndDragDropSource();
+                    }
+                    else if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip("Drag me to reorder");
+                    }
+
+                    ImGui.SetCursorScreenPos(dropTargetStart);
+                    ImGui.InvisibleButton($"dropTarget_{rule.Location}", new Vector2(30, 20));
+
+                    if (ImGui.BeginDragDropTarget())
+                    {
+                        var payload = ImGuiHelpers.AcceptDragDropPayload<int>("ClickItRuleIndex");
+                        if (payload != null && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+                        {
+                            var movedRule = rules[payload.Value];
+                            rules.RemoveAt(payload.Value);
+                            rules.Insert(i, movedRule);
+                            LoadItemFilters();
+                        }
+
+                        ImGui.EndDragDropTarget();
+                    }
+
+                    ImGui.PopID();
+
+                    // Toggle column
                     ImGui.TableSetColumnIndex(1);
-                    DrawItemTypeList("Blacklist##ItemType", ItemTypeBlacklistIds, moveToWhitelist: true, textColor: BlacklistTextColor);
+                    ImGui.PushID($"toggle_{rule.Location}");
+                    var enabled = rule.Enabled;
+                    if (ImGui.Checkbox("", ref enabled))
+                    {
+                        rule.Enabled = enabled;
+                        LoadItemFilters();
+                    }
+                    ImGui.PopID();
+
+                    // File column
+                    ImGui.TableSetColumnIndex(2);
+                    ImGui.PushID(rule.Location);
+
+                    var directoryPart = Path.GetDirectoryName(rule.Location)?.Replace("\\", "/") ?? "";
+                    var fileName = Path.GetFileName(rule.Location);
+                    var fileFullPath = Path.Combine(GetClickItConfigDirectory(), rule.Location);
+                    var cellWidth = ImGui.GetContentRegionAvail().X;
+
+                    ImGui.InvisibleButton($"FileCell_{rule.Location}", new Vector2(cellWidth, ImGui.GetFrameHeight()));
+                    ImGui.SameLine();
+
+                    DrawIflContextMenu(fileName, fileFullPath, $"FileCell_{rule.Location}");
+
+                    var textPos = ImGui.GetItemRectMin();
+                    ImGui.SetCursorScreenPos(textPos);
+
+                    if (!string.IsNullOrEmpty(directoryPart))
+                    {
+                        ImGui.TextColored(new Vector4(0.4f, 0.7f, 1.0f, 1.0f), directoryPart + "/");
+                        ImGui.SameLine(0, 0);
+                        ImGui.Text(fileName);
+                    }
+                    else
+                    {
+                        ImGui.Text(fileName);
+                    }
+
+                    ImGui.PopID();
                 }
-                finally
+
+                ImGui.EndTable();
+            }
+        }
+
+        private static void DrawIflContextMenu(string fileName, string fileFullPath, string contextMenuId)
+        {
+            if (ImGui.BeginPopupContextItem(contextMenuId))
+            {
+                if (ImGui.MenuItem("Open"))
                 {
-                    ImGui.EndTable();
+                    try
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = fileFullPath,
+                            UseShellExecute = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ClickIt] Failed to open file: {ex.Message}");
+                    }
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        [JsonIgnore]
+        private string? _clickItConfigDirectory;
+
+        internal string GetClickItConfigDirectory()
+        {
+            if (!string.IsNullOrEmpty(CustomConfigDir?.Value))
+            {
+                if (_clickItConfigDirectory != null)
+                {
+                    var parent = Path.GetDirectoryName(_clickItConfigDirectory);
+                    if (parent != null)
+                    {
+                        var custom = Path.Combine(parent, CustomConfigDir.Value);
+                        if (Directory.Exists(custom))
+                            return custom;
+                    }
                 }
             }
-            finally
-            {
-                ImGui.TreePop();
-            }
+
+            return _clickItConfigDirectory ?? "";
         }
 
-        private void DrawItemTypeList(string id, HashSet<string> sourceSet, bool moveToWhitelist, Vector4 textColor)
+        internal void SetConfigDirectory(string configDirectory)
         {
-            // Avoid BeginChild here for compatibility with older ImGuiNET builds bundled by ExileAPI.
-            ImGui.PushID(id);
+            _clickItConfigDirectory = configDirectory;
+        }
 
-            bool hasEntries = false;
-            foreach (ItemCategoryDefinition category in ItemCategoryCatalog.All)
+        private static ItemFilterLibrary.ItemFilter LoadItemFilterWithRetry(string rulePath)
+        {
+            const int maxRetries = 10;
+            int attempt = 0;
+            while (true)
             {
-                if (!ShouldRenderItemTypeCategory(sourceSet, category))
-                    continue;
-
-                hasEntries = true;
-                var rowState = DrawItemTypeRow(id, category, moveToWhitelist, textColor);
-
-                if (rowState.ArrowClicked)
+                try
                 {
-                    MoveItemTypeCategory(category.Id, moveToWhitelist);
-                    _expandedItemTypeRowKey = string.Empty;
-                    break;
+                    return ItemFilterLibrary.ItemFilter.LoadFromPath(rulePath);
                 }
-
-                if (rowState.RowClicked)
+                catch (IOException ex)
                 {
-                    ToggleExpandedRow(id, category.Id);
-                }
-
-                DrawItemTypeExamplesIfHovered(category, rowState.RowHovered);
-
-                if (IsExpandedRow(id, category.Id))
-                {
-                    DrawItemTypeSubtypePanel(id, category, isSourceWhitelist: !moveToWhitelist);
+                    attempt++;
+                    if (attempt >= maxRetries)
+                        throw new IOException($"Failed to load file after {maxRetries} attempts: {rulePath}", ex);
+                    Thread.Sleep(100);
                 }
             }
-
-            DrawNoEntriesPlaceholder(hasEntries);
-
-            ImGui.PopID();
         }
 
-        private bool ShouldRenderItemTypeCategory(HashSet<string> sourceSet, ItemCategoryDefinition category)
+        public void LoadItemFilters()
         {
-            return sourceSet.Contains(category.Id) && MatchesItemTypeSearch(category, itemTypeSearchFilter);
-        }
-
-        private readonly struct ItemTypeRowRenderState(bool rowClicked, bool arrowClicked, bool rowHovered)
-        {
-            public bool RowClicked { get; } = rowClicked;
-            public bool ArrowClicked { get; } = arrowClicked;
-            public bool RowHovered { get; } = rowHovered;
-        }
-
-        private ItemTypeRowRenderState DrawItemTypeRow(string id, ItemCategoryDefinition category, bool moveToWhitelist, Vector4 textColor)
-        {
-            string label = BuildItemTypeRowLabel(id, category);
-            float rowWidth = CalculateItemTypeRowWidth();
-            const float arrowWidth = 28f;
-
-            if (moveToWhitelist)
+            var configDir = GetClickItConfigDirectory();
+            if (string.IsNullOrEmpty(configDir) || !Directory.Exists(configDir))
             {
-                bool leftArrowClicked = ImGui.Button($"<-##Move_{id}_{category.Id}", new Vector2(arrowWidth, 0));
-                ImGui.SameLine();
-                bool rowClicked = DrawItemTypeSelectable(id, category, textColor, label, rowWidth);
-                bool rowHovered = ImGui.IsItemHovered();
-                return new ItemTypeRowRenderState(rowClicked, leftArrowClicked, rowHovered);
-            }
-
-            bool clicked = DrawItemTypeSelectable(id, category, textColor, label, rowWidth);
-            bool hovered = ImGui.IsItemHovered();
-            ImGui.SameLine();
-            bool rightArrowClicked = ImGui.Button($"->##Move_{id}_{category.Id}", new Vector2(arrowWidth, 0));
-            return new ItemTypeRowRenderState(clicked, rightArrowClicked, hovered);
-        }
-
-        private static string BuildItemTypeRowLabel(string id, ItemCategoryDefinition category)
-        {
-            bool hasSubtypeMenu = TryGetSubtypeDefinitions(category.Id, out _);
-            string submenuIndicator = hasSubtypeMenu ? " [v]" : string.Empty;
-            return $"{category.DisplayName}{submenuIndicator}##{id}_{category.Id}";
-        }
-
-        private static float CalculateItemTypeRowWidth()
-        {
-            float availableWidth = Math.Max(80f, ImGui.GetContentRegionAvail().X);
-            const float arrowWidth = 28f;
-            return Math.Max(40f, availableWidth - arrowWidth - 6f);
-        }
-
-        private bool DrawItemTypeSelectable(string id, ItemCategoryDefinition category, Vector4 textColor, string label, float rowWidth)
-        {
-            ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-            bool clicked = ImGui.Selectable(label, IsExpandedRow(id, category.Id), ImGuiSelectableFlags.AllowDoubleClick, new Vector2(rowWidth, 0));
-            ImGui.PopStyleColor();
-            return clicked;
-        }
-
-        private static void DrawItemTypeExamplesIfHovered(ItemCategoryDefinition category, bool rowHovered)
-        {
-            if (!rowHovered || category.ExampleItems.Count == 0)
-            {
+                ItemFilters = new List<ItemFilterLibrary.ItemFilter>();
                 return;
             }
 
-            string examples = string.Join(", ", category.ExampleItems);
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.65f, 0.65f, 0.65f, 1f));
-            ImGui.Indent();
-            ImGui.TextWrapped($"Examples: {examples}");
-            ImGui.Unindent();
-            ImGui.PopStyleColor();
+            var existingRules = ClickItRules;
+            try
+            {
+                var diskFiles = new DirectoryInfo(configDir)
+                    .GetFiles("*.ifl", SearchOption.AllDirectories)
+                    .ToList();
+
+                var newRules = diskFiles
+                    .Select(fileInfo => new ClickItRule(
+                        fileInfo.Name,
+                        Path.GetRelativePath(configDir, fileInfo.FullName),
+                        false))
+                    .Where(r => !existingRules.Any(e => string.Equals(e.Location, r.Location, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
+                foreach (var existingRule in existingRules)
+                {
+                    var fullPath = Path.Combine(configDir, existingRule.Location);
+                    if (File.Exists(fullPath))
+                        newRules.Add(existingRule);
+                }
+
+                ItemFilters = newRules
+                    .Where(rule => rule.Enabled)
+                    .Select(rule =>
+                    {
+                        var rulePath = Path.Combine(configDir, rule.Location);
+                        return LoadItemFilterWithRetry(rulePath);
+                    })
+                    .ToList();
+
+                ClickItRules = newRules;
+            }
+            catch (Exception e)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ClickIt] Error loading IFL rule files: {e.Message}");
+            }
         }
 
         private void DrawEssenceCorruptionTablePanel()
@@ -436,9 +505,16 @@ namespace ClickIt
             ImGui.PopID();
         }
 
+        private static float CalculateRowWidth()
+        {
+            float availableWidth = Math.Max(80f, ImGui.GetContentRegionAvail().X);
+            const float arrowWidth = 28f;
+            return Math.Max(40f, availableWidth - arrowWidth - 6f);
+        }
+
         private static bool DrawTransferListRow(string listId, string key, string displayText, bool moveToPrimaryList, Vector4 textColor)
         {
-            float rowWidth = CalculateItemTypeRowWidth();
+            float rowWidth = CalculateRowWidth();
             const float arrowWidth = 28f;
 
             if (moveToPrimaryList)
@@ -895,224 +971,7 @@ namespace ClickIt
             return entry != null;
         }
 
-        private void DrawItemTypeSubtypePanel(string listId, ItemCategoryDefinition category, bool isSourceWhitelist)
-        {
-            if (!TryGetSubtypeDefinitions(category.Id, out ItemSubtypeDefinition[] subtypeDefinitions))
-            {
-                return;
-            }
 
-            HashSet<string> selectedSubtypeIds = GetOrCreateSubtypeSelection(isSourceWhitelist, category.Id);
-
-            ImGui.Indent();
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.75f, 0.75f, 0.75f, 1f));
-            ImGui.TextWrapped("Subtype filter: select subtypes to narrow this category. Example: choosing only Helmets means Body Armours/Gloves/Boots/Shields will be treated as being in the opposite list.");
-            ImGui.PopStyleColor();
-
-            bool hasActiveSelection = selectedSubtypeIds.Count > 0;
-            foreach (ItemSubtypeDefinition subtype in subtypeDefinitions)
-            {
-                DrawSubtypeCheckboxRow(listId, category.Id, isSourceWhitelist, hasActiveSelection, selectedSubtypeIds, subtype);
-            }
-
-            ImGui.Unindent();
-        }
-
-        private void DrawSubtypeCheckboxRow(
-            string listId,
-            string categoryId,
-            bool isSourceWhitelist,
-            bool hasActiveSelection,
-            HashSet<string> selectedSubtypeIds,
-            ItemSubtypeDefinition subtype)
-        {
-            bool isSelected = selectedSubtypeIds.Contains(subtype.Id);
-            bool subtypeIsWhitelistSide = hasActiveSelection
-                ? (isSourceWhitelist ? isSelected : !isSelected)
-                : isSourceWhitelist;
-            Vector4 subtypeTextColor = subtypeIsWhitelistSide ? WhitelistTextColor : BlacklistTextColor;
-
-            ImGui.PushStyleColor(ImGuiCol.Text, subtypeTextColor);
-            if (ImGui.Checkbox($"{subtype.DisplayName}##Subtype_{listId}_{categoryId}_{subtype.Id}", ref isSelected))
-            {
-                if (isSelected)
-                {
-                    selectedSubtypeIds.Add(subtype.Id);
-                }
-                else
-                {
-                    selectedSubtypeIds.Remove(subtype.Id);
-                }
-            }
-            ImGui.PopStyleColor();
-
-            if (ImGui.IsItemHovered())
-            {
-                string metadataPreview = string.Join("\n", subtype.MetadataIdentifiers);
-                ImGui.SetTooltip(metadataPreview);
-            }
-        }
-
-        private static bool TryGetSubtypeDefinitions(string categoryId, out ItemSubtypeDefinition[] definitions)
-        {
-            return ItemSubtypeCatalog.TryGetValue(categoryId, out definitions!);
-        }
-
-        private HashSet<string> GetOrCreateSubtypeSelection(bool isWhitelist, string categoryId)
-        {
-            Dictionary<string, HashSet<string>> source = isWhitelist ? ItemTypeWhitelistSubtypeIds : ItemTypeBlacklistSubtypeIds;
-            if (!source.TryGetValue(categoryId, out HashSet<string>? subtypeSelection))
-            {
-                subtypeSelection = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                source[categoryId] = subtypeSelection;
-            }
-
-            return subtypeSelection;
-        }
-
-        private static string BuildExpandedRowKey(string listId, string categoryId)
-        {
-            return $"{listId}:{categoryId}";
-        }
-
-        private bool IsExpandedRow(string listId, string categoryId)
-        {
-            return string.Equals(_expandedItemTypeRowKey, BuildExpandedRowKey(listId, categoryId), StringComparison.Ordinal);
-        }
-
-        private void ToggleExpandedRow(string listId, string categoryId)
-        {
-            string rowKey = BuildExpandedRowKey(listId, categoryId);
-            if (string.Equals(_expandedItemTypeRowKey, rowKey, StringComparison.Ordinal))
-            {
-                _expandedItemTypeRowKey = string.Empty;
-            }
-            else
-            {
-                _expandedItemTypeRowKey = rowKey;
-            }
-        }
-
-        private void MoveItemTypeCategory(string categoryId, bool moveToWhitelist)
-        {
-            HashSet<string> sourceSet = moveToWhitelist ? ItemTypeBlacklistIds : ItemTypeWhitelistIds;
-            HashSet<string> targetSet = moveToWhitelist ? ItemTypeWhitelistIds : ItemTypeBlacklistIds;
-            Dictionary<string, HashSet<string>> sourceSubtypeDict = moveToWhitelist ? ItemTypeBlacklistSubtypeIds : ItemTypeWhitelistSubtypeIds;
-            Dictionary<string, HashSet<string>> targetSubtypeDict = moveToWhitelist ? ItemTypeWhitelistSubtypeIds : ItemTypeBlacklistSubtypeIds;
-
-            sourceSet.Remove(categoryId);
-            targetSet.Add(categoryId);
-
-            if (sourceSubtypeDict.TryGetValue(categoryId, out HashSet<string>? subtypeSelection))
-            {
-                sourceSubtypeDict.Remove(categoryId);
-                targetSubtypeDict[categoryId] = new HashSet<string>(subtypeSelection, StringComparer.OrdinalIgnoreCase);
-            }
-            else
-            {
-                targetSubtypeDict.Remove(categoryId);
-            }
-        }
-
-        private static bool MatchesItemTypeSearch(ItemCategoryDefinition category, string filter)
-        {
-            if (string.IsNullOrWhiteSpace(filter))
-                return true;
-
-            string term = filter.Trim();
-            return category.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
-                || category.MetadataIdentifiers.Any(x => x.Contains(term, StringComparison.OrdinalIgnoreCase))
-                || category.Id.Contains(term, StringComparison.OrdinalIgnoreCase);
-        }
-
-        public IReadOnlyList<string> GetItemTypeWhitelistMetadataIdentifiers()
-        {
-            EnsureItemTypeFiltersInitialized();
-            return BuildItemTypeMetadataIdentifiers(
-                primaryIds: ItemTypeWhitelistIds,
-                primaryIsWhitelist: true,
-                oppositeIds: ItemTypeBlacklistIds,
-                oppositeIsWhitelist: false);
-        }
-
-        public IReadOnlyList<string> GetItemTypeBlacklistMetadataIdentifiers()
-        {
-            EnsureItemTypeFiltersInitialized();
-            return BuildItemTypeMetadataIdentifiers(
-                primaryIds: ItemTypeBlacklistIds,
-                primaryIsWhitelist: false,
-                oppositeIds: ItemTypeWhitelistIds,
-                oppositeIsWhitelist: true);
-        }
-
-        private string[] BuildItemTypeMetadataIdentifiers(
-            HashSet<string> primaryIds,
-            bool primaryIsWhitelist,
-            HashSet<string> oppositeIds,
-            bool oppositeIsWhitelist)
-        {
-            HashSet<string> metadataIdentifiers = new(StringComparer.OrdinalIgnoreCase);
-
-            AddEffectiveMetadataIdentifiers(metadataIdentifiers, primaryIds, primaryIsWhitelist, includeOppositeSubtypeSelections: false);
-            AddEffectiveMetadataIdentifiers(metadataIdentifiers, oppositeIds, oppositeIsWhitelist, includeOppositeSubtypeSelections: true);
-
-            return metadataIdentifiers.ToArray();
-        }
-
-        private void AddEffectiveMetadataIdentifiers(
-            HashSet<string> target,
-            HashSet<string> categoryIds,
-            bool isWhitelist,
-            bool includeOppositeSubtypeSelections)
-        {
-            foreach (string categoryId in categoryIds)
-            {
-                foreach (string metadataIdentifier in GetEffectiveMetadataIdentifiers(categoryId, isWhitelist, includeOppositeSubtypeSelections))
-                {
-                    if (!string.IsNullOrWhiteSpace(metadataIdentifier))
-                    {
-                        target.Add(metadataIdentifier);
-                    }
-                }
-            }
-        }
-
-        private IEnumerable<string> GetEffectiveMetadataIdentifiers(string categoryId, bool isWhitelist, bool includeOppositeSubtypeSelections)
-        {
-            if (!ItemCategoryCatalog.TryGet(categoryId, out ItemCategoryDefinition? category))
-            {
-                return [];
-            }
-
-            if (!TryGetSubtypeDefinitions(categoryId, out ItemSubtypeDefinition[] subtypeDefinitions))
-            {
-                if (includeOppositeSubtypeSelections)
-                {
-                    return [];
-                }
-
-                return category.MetadataIdentifiers;
-            }
-
-            Dictionary<string, HashSet<string>> subtypeConfig = isWhitelist ? ItemTypeWhitelistSubtypeIds : ItemTypeBlacklistSubtypeIds;
-            if (!subtypeConfig.TryGetValue(categoryId, out HashSet<string>? selectedSubtypeIds) || selectedSubtypeIds.Count == 0)
-            {
-                if (includeOppositeSubtypeSelections)
-                {
-                    return [];
-                }
-
-                return category.MetadataIdentifiers;
-            }
-
-            return subtypeDefinitions
-                .Where(x => includeOppositeSubtypeSelections
-                    ? !selectedSubtypeIds.Contains(x.Id)
-                    : selectedSubtypeIds.Contains(x.Id))
-                .SelectMany(x => x.MetadataIdentifiers)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-        }
 
         private void DrawExarchSection()
         {

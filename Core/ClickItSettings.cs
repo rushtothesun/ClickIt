@@ -2,6 +2,7 @@ using ExileCore.Shared.Attributes;
 using ExileCore.Shared.Interfaces;
 using ExileCore.Shared.Nodes;
 using ImGuiNET;
+using ItemFilterLibrary;
 using Newtonsoft.Json;
 using System.Numerics;
 using ClickIt.Definitions;
@@ -197,23 +198,17 @@ namespace ClickIt
         [Menu("Items", "Click items", 1, 1500)]
         public ToggleNode ClickItems { get; set; } = new ToggleNode(true);
 
-        [Menu("Item Type Filters", "", 2, 1500)]
+        [Menu("Item Filter Rules", "", 2, 1500)]
         [JsonIgnore]
-        public CustomNode ItemTypeFiltersPanel { get; }
+        public CustomNode ItemFilterRulesPanel { get; }
 
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
-        public HashSet<string> ItemTypeWhitelistIds { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public List<ClickItRule> ClickItRules { get; set; } = new();
 
-        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
-        public HashSet<string> ItemTypeBlacklistIds { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public TextNode CustomConfigDir { get; set; } = new TextNode();
 
-        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
-        public Dictionary<string, HashSet<string>> ItemTypeWhitelistSubtypeIds { get; set; } = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-
-        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
-        public Dictionary<string, HashSet<string>> ItemTypeBlacklistSubtypeIds { get; set; } = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-
-        private string _expandedItemTypeRowKey = string.Empty;
+        [JsonIgnore]
+        public List<ItemFilter> ItemFilters { get; set; } = new();
 
         // ----- Essences -----
         [Menu("Essences", 1600)]
@@ -249,6 +244,8 @@ namespace ClickIt
         // ----- Strongboxes -----
         [Menu("Strongboxes", 1800)]
         public EmptyNode Strongboxes { get; set; } = new EmptyNode();
+        [Menu("Click Strongboxes", "Master toggle to enable/disable clicking strongboxes", 0, 1800)]
+        public ToggleNode ClickStrongboxes { get; set; } = new ToggleNode(true);
         [Menu("Show Strongbox Frames", "When enabled, draws a visual frame around strongboxes indicating whether or not they are locked", 1, 1800)]
         public ToggleNode ShowStrongboxFrames { get; set; } = new ToggleNode(true);
         [Menu("Strongbox Table", "", 2, 1800)]
@@ -351,7 +348,6 @@ namespace ClickIt
 
         private string upsideSearchFilter = "";
         private string downsideSearchFilter = "";
-        private string itemTypeSearchFilter = "";
         private string essenceSearchFilter = "";
         private string strongboxSearchFilter = "";
         private string ultimatumSearchFilter = "";
@@ -362,7 +358,6 @@ namespace ClickIt
         public ClickItSettings()
         {
             InitializeDefaultWeights();
-            EnsureItemTypeFiltersInitialized();
             EnsureMechanicPrioritiesInitialized();
             EnsureEssenceCorruptionFiltersInitialized();
             EnsureStrongboxFiltersInitialized();
@@ -379,9 +374,9 @@ namespace ClickIt
             {
                 DrawDelegate = () => DrawPanelSafe("AltarModWeights", DrawAltarModWeights)
             };
-            ItemTypeFiltersPanel = new CustomNode
+            ItemFilterRulesPanel = new CustomNode
             {
-                DrawDelegate = () => DrawPanelSafe("ItemTypeFiltersPanel", DrawItemTypeFiltersPanel)
+                DrawDelegate = () => DrawPanelSafe("ItemFilterRulesPanel", DrawItemFilterRulesPanel)
             };
             MechanicPriorityTablePanel = new CustomNode
             {

@@ -1,4 +1,4 @@
-﻿using ClickIt.Utils;
+using ClickIt.Utils;
 using ExileCore;
 using System.Diagnostics;
 
@@ -118,6 +118,10 @@ namespace ClickIt
             coroutineManager.StartCoroutines(this);
 
             Settings.EnsureAllModsHaveWeights();
+
+            // Set up IFL config directory and load item filters
+            Settings.SetConfigDirectory(ConfigDirectory);
+            Settings.LoadItemFilters();
 
             Settings.OpenConfigDirectory.OnPressed += alertService.OpenConfigDirectory;
             Settings.ReloadAlertSound.OnPressed += alertService.ReloadAlertSound;

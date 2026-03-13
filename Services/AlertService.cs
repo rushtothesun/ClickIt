@@ -30,7 +30,6 @@ namespace ClickIt.Services
         internal void SetAlertSoundPathForTests(string? path) => _alertSoundPath = path;
 
         private const string AlertFileName = "alert.wav";
-        private const string AlertDownloadUrl = "https://raw.githubusercontent.com/Barragek0/ClickIt/main/alert.wav";
 
         public void ReloadAlertSound()
         {
@@ -42,12 +41,12 @@ namespace ClickIt.Services
                 {
                     _logMessage("Alert sound not found in config directory.", 5);
 
-                    bool tryDownload = _settingsProvider()?.AutoDownloadAlertSound?.Value == true;
-                    tryDownload = tryDownload && !_disableAutoDownloadProvider();
+                    bool tryCopy = _settingsProvider()?.AutoDownloadAlertSound?.Value == true;
+                    tryCopy = tryCopy && !_disableAutoDownloadProvider();
 
-                    if (tryDownload)
+                    if (tryCopy)
                     {
-                        TryDownloadDefaultAlert(file);
+                        TryCopyAlertFromSource(file);
                         if (!string.IsNullOrEmpty(_alertSoundPath))
                         {
                             return;
@@ -137,30 +136,36 @@ namespace ClickIt.Services
             }
         }
 
-        private void TryDownloadDefaultAlert(string file)
+        private void TryCopyAlertFromSource(string targetFile)
         {
             try
             {
-                _logMessage("Attempting to download default alert sound from GitHub...", 10);
-                using (var http = new HttpClient())
-                {
-                    http.Timeout = TimeSpan.FromSeconds(5);
-                    var resp = http.GetAsync(AlertDownloadUrl).GetAwaiter().GetResult();
-                    if (resp.IsSuccessStatusCode)
-                    {
-                        var bytes = resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
-                        File.WriteAllBytes(file, bytes);
-                        _logMessage($"Downloaded default alert sound to {file}", 20);
-                        _alertSoundPath = file;
-                        return;
-                    }
+                // Look for alert.wav in the plugin source directory
+                var configDir = _configDirectoryProvider();
+                var configParent = Path.GetDirectoryName(configDir);
+                if (configParent == null) return;
 
-                    _logError($"Failed to download alert sound: server returned {(int)resp.StatusCode}", 20);
+                var root = Path.GetDirectoryName(configParent);
+                if (root == null) return;
+
+                var sourceFile = Path.Combine(root, "Plugins", "Source", "ClickIt", AlertFileName);
+                if (!File.Exists(sourceFile))
+                {
+                    _logMessage("Source alert.wav not found in plugin source directory.", 10);
+                    return;
                 }
+
+                var targetDir = Path.GetDirectoryName(targetFile);
+                if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
+                    Directory.CreateDirectory(targetDir);
+
+                File.Copy(sourceFile, targetFile, overwrite: false);
+                _logMessage($"Copied alert.wav from source to {targetFile}", 20);
+                _alertSoundPath = targetFile;
             }
             catch (Exception ex)
             {
-                _logError($"Downloading alert sound failed: {ex.Message}", 20);
+                _logError($"Failed to copy alert sound from source: {ex.Message}", 20);
             }
         }
     }
